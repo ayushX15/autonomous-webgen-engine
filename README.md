@@ -54,4 +54,8 @@ Terminal 2 — Frontend:
 cd ai-design-agent/control-panel
 npm run dev
 
+Terminal 3 — Generated Final Output
+copy the location from the frontend and paste in the terminal 3
+npm run dev
+
 Open: http://localhost:3000
