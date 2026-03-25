@@ -1,0 +1,9 @@
+ai_env/
+__pycache__/
+*.pyc
+.env
+.vscode/
+node_modules/
+generated-output/
+*.env
+secret.env
