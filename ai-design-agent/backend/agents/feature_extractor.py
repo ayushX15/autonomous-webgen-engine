@@ -69,6 +69,22 @@ def extract_features(state: AgentState) -> AgentState:
             else:
                 print(f"[Feature Extractor] Failed to scrape: {result['url']}")
 
+    # Cache the first available reference image (scraped screenshot, else uploaded
+    # file) so the code generator can feed the real image into Gemini at
+    # generation time — no re-scraping, and generation is grounded in the actual
+    # reference rather than only a text description of it.
+    import base64
+    if screenshot_bytes_list:
+        state.reference_image_b64 = base64.b64encode(screenshot_bytes_list[0]).decode("ascii")
+    elif user_input.reference_image_paths:
+        try:
+            from pathlib import Path as _Path
+            first = _Path(user_input.reference_image_paths[0])
+            if first.exists():
+                state.reference_image_b64 = base64.b64encode(first.read_bytes()).decode("ascii")
+        except Exception as e:
+            print(f"[Feature Extractor] Could not read uploaded reference image: {e}")
+
     # ── Build prompt ──────────────────────────────────────────────────────────
     scraped_summary = _build_scraped_summary(scraped_results)
     prompt = FEATURE_EXTRACTION_PROMPT.format(

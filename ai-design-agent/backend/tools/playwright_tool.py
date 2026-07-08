@@ -5,12 +5,50 @@ import os
 import sys
 import time
 import signal
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 
-NPM_CMD = "npm.cmd" if os.name == "nt" else "npm"
 WORKER_SCRIPT = Path(__file__).resolve().parent / "screenshot_worker.py"
+
+
+def _find_npm() -> str:
+    """Resolves an absolute path to npm. Plain `subprocess.run(["npm.cmd", ...])`
+    depends on Node's install directory being on THIS process's PATH — which is
+    often not true even when Node works fine in an interactive terminal (e.g.
+    the installer didn't register PATH, or the backend was launched from a
+    shell/service that predates the PATH update). Falls back to common Windows
+    install locations before giving up with an actionable error."""
+    candidates = ["npm.cmd", "npm"] if os.name == "nt" else ["npm"]
+    for candidate in candidates:
+        found = shutil.which(candidate)
+        if found:
+            return found
+
+    if os.name == "nt":
+        for env_var in ("ProgramFiles", "ProgramFiles(x86)"):
+            base = os.environ.get(env_var)
+            if base:
+                guess = Path(base) / "nodejs" / "npm.cmd"
+                if guess.exists():
+                    return str(guess)
+
+    raise FileNotFoundError(
+        "Could not find npm. Install Node.js from https://nodejs.org, make sure "
+        "it's on your PATH, then restart the backend server."
+    )
+
+
+def _node_env() -> dict:
+    """npm.cmd is itself a wrapper script that shells out to a bare `node` —
+    so even calling it by absolute path fails if Node's directory isn't on
+    THIS subprocess's PATH. Prepend it explicitly rather than relying on the
+    parent process's (possibly Node-less) environment."""
+    env = os.environ.copy()
+    node_dir = str(Path(_find_npm()).parent)
+    env["PATH"] = node_dir + os.pathsep + env.get("PATH", "")
+    return env
 
 
 def install_dependencies(run_dir: Path) -> bool:
@@ -18,11 +56,12 @@ def install_dependencies(run_dir: Path) -> bool:
     print(f"[Playwright Tool] Installing npm dependencies in {run_dir.name}...")
 
     result = subprocess.run(
-        [NPM_CMD, "install"],
+        [_find_npm(), "install"],
         cwd=str(run_dir),
         capture_output=True,
         text=True,
-        timeout=180
+        timeout=180,
+        env=_node_env(),
     )
 
     if result.returncode != 0:
@@ -38,10 +77,11 @@ def start_nextjs_server(run_dir: Path, port: int = 3001) -> subprocess.Popen:
     print(f"[Playwright Tool] Starting Next.js server on port {port}...")
 
     process = subprocess.Popen(
-        [NPM_CMD, "run", "dev", "--", "--port", str(port)],
+        [_find_npm(), "run", "dev", "--", "--port", str(port)],
         cwd=str(run_dir),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env=_node_env(),
         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
     )
 

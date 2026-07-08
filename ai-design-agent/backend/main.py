@@ -3,17 +3,24 @@
 # FastAPI application — complete working version
 # ─────────────────────────────────────────────────────────────────────────────
 
+import sys
+
+# Windows' legacy console codepage (cp1252) can't encode the emoji used in log/
+# progress messages throughout this codebase — printing one crashes the whole
+# background task. Force UTF-8 on stdout/stderr before anything else prints.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 import os
-import re
 import json
 import asyncio
 import concurrent.futures
 import uuid
 from pathlib import Path
-from typing import Optional
 from dotenv import load_dotenv
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, BackgroundTasks
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, BackgroundTasks, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -21,7 +28,11 @@ from pydantic import BaseModel
 load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / "secret.env")
 
 from backend.graph.workflow import run_workflow
-from backend.models.schemas import AgentState
+
+UPLOAD_DIR = Path(os.getenv("GENERATED_OUTPUT_DIR", "./generated-output")).resolve() / "_uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp"}
+MAX_UPLOAD_BYTES = 8 * 1024 * 1024  # 8 MB
 
 # ─────────────────────────────────────────────────────────────────────────────
 # App
@@ -80,61 +91,66 @@ def health_check():
 # ─────────────────────────────────────────────────────────────────────────────
 # ENDPOINT 2 — Gemini quota status
 # ─────────────────────────────────────────────────────────────────────────────
+# NOTE: this used to make a real Gemini API call on every poll, which alone could
+# exhaust the free-tier daily quota just from the UI's periodic status checks.
+# Instead we report the local call counter and the last real 429 seen (if any) —
+# no network call, no quota spent.
 @app.get("/api/quota")
 def get_quota():
-    """
-    Checks Gemini API quota by making a minimal test call.
-    Returns status, call count, and percentage used.
-    """
-    try:
-        # Import call counter from gemini_client
-        from backend.tools.gemini_client import get_call_count
-        calls_used = get_call_count()
-        calls_limit = 20  # free tier daily limit for gemini-2.5-flash
+    from backend.tools.gemini_client import get_quota_state
 
-        import google.generativeai as genai
-        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-        model = genai.GenerativeModel(os.getenv("GEMINI_MODEL", "gemini-2.5-flash"))
-        model.generate_content("OK")
+    state = get_quota_state()
+    daily_estimate = int(os.getenv("GEMINI_DAILY_QUOTA_ESTIMATE", "1500"))
+    model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
-        # Count this test call
-        calls_used += 1
-        percent_used = min(100, round((calls_used / calls_limit) * 100))
-
+    if state["exhausted"]:
         return {
-            "status": "available",
-            "model": os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
-            "message": "Gemini Ready",
-            "calls_used": calls_used,
-            "calls_limit": calls_limit,
-            "percent_used": percent_used
+            "status": "exhausted",
+            "model": model,
+            "message": state["message"],
+            "calls_used": state["calls_used"],
+            "calls_limit": daily_estimate,
+            "percent_used": 100,
         }
 
-    except Exception as e:
-        err = str(e)
-        if "429" in err or "RESOURCE_EXHAUSTED" in err:
-            delay = re.search(r'seconds:\s*(\d+)', err)
-            wait = int(delay.group(1)) if delay else 60
-            return {
-                "status": "exhausted",
-                "model": os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
-                "message": "Quota Full — resets in ~" + str(wait) + "s",
-                "calls_used": 20,
-                "calls_limit": 20,
-                "percent_used": 100
-            }
-        return {
-            "status": "error",
-            "model": os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
-            "message": str(e)[:100],
-            "calls_used": 0,
-            "calls_limit": 20,
-            "percent_used": 0
-        }
+    percent_used = min(100, round((state["calls_used"] / daily_estimate) * 100)) if daily_estimate else 0
+    return {
+        "status": "available",
+        "model": model,
+        "message": "Gemini Ready",
+        "calls_used": state["calls_used"],
+        "calls_limit": daily_estimate,
+        "percent_used": percent_used,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ENDPOINT 3 — Start a new run
+# ENDPOINT 3 — Upload a reference image
+# POST /api/upload  →  { "path": "<absolute path usable as reference_image_paths>" }
+# ─────────────────────────────────────────────────────────────────────────────
+@app.post("/api/upload")
+async def upload_reference_image(file: UploadFile = File(...)):
+    if file.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(400, f"Unsupported file type: {file.content_type}. Use PNG, JPEG, or WebP.")
+
+    suffix = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}[file.content_type]
+    dest = UPLOAD_DIR / f"{uuid.uuid4().hex}{suffix}"
+
+    size = 0
+    with open(dest, "wb") as out:
+        while chunk := await file.read(1024 * 1024):
+            size += len(chunk)
+            if size > MAX_UPLOAD_BYTES:
+                out.close()
+                dest.unlink(missing_ok=True)
+                raise HTTPException(400, "File too large (max 8MB).")
+            out.write(chunk)
+
+    return {"path": str(dest)}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ENDPOINT 4 — Start a new run
 # POST /api/run
 # ─────────────────────────────────────────────────────────────────────────────
 @app.post("/api/run", response_model=RunResponse)
@@ -153,6 +169,7 @@ async def start_run(request: RunRequest, background_tasks: BackgroundTasks):
         "final_output_path": None,
         "error_message": None,
         "iteration_results": [],
+        "pages": [],
         "progress_messages": []
     }
 
@@ -199,6 +216,10 @@ async def _run_workflow_background(run_id: str, request: RunRequest):
             "iteration_results": [
                 r.model_dump() for r in final_state.iteration_results
             ],
+            "pages": [
+                {"name": p.page_name, "route": p.route_path}
+                for p in final_state.generated_pages
+            ],
             "progress_messages": runs[run_id].get("progress_messages", [])
         }
 
@@ -216,7 +237,7 @@ async def _run_workflow_background(run_id: str, request: RunRequest):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ENDPOINT 4 — Get run status
+# ENDPOINT 5 — Get run status
 # GET /api/status/{run_id}
 # ─────────────────────────────────────────────────────────────────────────────
 @app.get("/api/status/{run_id}")
@@ -235,12 +256,13 @@ def get_status(run_id: str):
         "final_output_path": run.get("final_output_path"),
         "error_message": run.get("error_message"),
         "iteration_results": run.get("iteration_results", []),
+        "pages": run.get("pages", []),
         "progress_messages": run.get("progress_messages", [])
     }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ENDPOINT 5 — List all runs
+# ENDPOINT 6 — List all runs
 # GET /api/runs
 # ─────────────────────────────────────────────────────────────────────────────
 @app.get("/api/runs")
@@ -262,7 +284,7 @@ def list_runs():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ENDPOINT 6 — WebSocket real-time updates
+# ENDPOINT 7 — WebSocket real-time updates
 # WS /ws/run
 # ─────────────────────────────────────────────────────────────────────────────
 @app.websocket("/ws/run")

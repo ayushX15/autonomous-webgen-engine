@@ -17,6 +17,11 @@ export interface IterationResult {
   screenshot_path: string | null
 }
 
+export interface GeneratedPageInfo {
+  name: string
+  route: string
+}
+
 export interface RunStatus {
   run_id: string
   status: 'running' | 'complete' | 'error'
@@ -26,6 +31,7 @@ export interface RunStatus {
   final_output_path: string | null
   error_message: string | null
   iteration_results: IterationResult[]
+  pages: GeneratedPageInfo[]
   progress_messages: string[]
 }
 
@@ -34,6 +40,17 @@ export interface QuotaStatus {
   model: string
   message: string
   percentage: number
+}
+
+export async function uploadReferenceImage(file: File): Promise<{ path: string }> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch(`${BASE}/api/upload`, { method: 'POST', body: form })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.detail || `Upload failed: ${res.statusText}`)
+  }
+  return res.json()
 }
 
 export async function startRun(req: RunRequest): Promise<{ run_id: string }> {

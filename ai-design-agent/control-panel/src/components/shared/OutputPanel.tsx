@@ -1,193 +1,3 @@
-// 'use client'
-// import { useUI } from '@/context/UIContext'
-// import { RunStatus } from '@/lib/api'
-
-// interface Props { status: RunStatus | null }
-
-// interface PageLink {
-//   label: string
-//   route: string
-// }
-
-// const PAGE_LINKS: PageLink[] = [
-//   { label: 'Landing', route: '/' },
-//   { label: 'About',   route: '/about' },
-//   { label: 'Contact', route: '/contact' },
-//   { label: 'Products',route: '/products' },
-// ]
-
-// export default function OutputPanel({ status }: Props) {
-//   const { isEnhanced } = useUI()
-
-//   const card = isEnhanced
-//     ? 'bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6'
-//     : 'bg-[#111827] border border-[#1f2937] rounded-xl p-5'
-
-//   // ── Empty state ────────────────────────────────────────────────────────────
-//   if (!status || status.status !== 'complete') {
-//     return (
-//       <div className={card}>
-//         <div className="flex items-center gap-2 mb-5">
-//           <span className="text-lg">📦</span>
-//           <h2 className="text-sm font-bold text-white uppercase tracking-widest">
-//             Output
-//           </h2>
-//         </div>
-//         <div className="text-center py-10">
-//           <div className="text-3xl mb-2">⏳</div>
-//           <p className="text-sm text-gray-500">
-//             Output appears here when generation completes.
-//           </p>
-//         </div>
-//       </div>
-//     )
-//   }
-
-//   // ── Compute values ─────────────────────────────────────────────────────────
-//   const runId = (status.final_output_path ?? '')
-//     .replace(/\\/g, '/')
-//     .split('/')
-//     .pop() ?? ''
-
-//   const path = (status.final_output_path ?? '').replace(/\\/g, '/')
-
-//   const best = status.iteration_results.length > 0
-//     ? status.iteration_results.reduce((a, b) =>
-//         a.similarity_score > b.similarity_score ? a : b
-//       )
-//     : null
-
-//   const score = best ? Math.round(best.similarity_score * 100) : 0
-
-//   const stats = [
-//     { key: 'Run ID',      value: runId },
-//     { key: 'Iterations',  value: status.current_iteration + ' / ' + status.max_iterations },
-//     { key: 'Best Score',  value: score + '%', highlight: score >= 75 },
-//   ]
-
-//   const commands = [
-//     'cd "' + path + '"',
-//     'npm install',
-//     'npm run dev',
-//   ]
-
-//   // ── Render ─────────────────────────────────────────────────────────────────
-//   return (
-//     <div className={card}>
-
-//       {/* Header */}
-//       <div className="flex items-center gap-2 mb-5">
-//         <span className="text-lg">📦</span>
-//         <h2 className="text-sm font-bold text-white uppercase tracking-widest">
-//           Output
-//         </h2>
-//       </div>
-
-//       {/* Success banner */}
-//       <div className="mb-5 p-4 rounded-xl bg-green-950/30 border border-green-800/40">
-//         <div className="flex items-center gap-2 mb-1">
-//           <span className="text-green-400">✅</span>
-//           <span className="font-bold text-green-400 text-sm">
-//             Generation Complete!
-//           </span>
-//         </div>
-//         <p className="text-xs text-gray-500">
-//           {status.current_iteration} iteration(s) · Best score: {score}%
-//         </p>
-//       </div>
-
-//       {/* Stats rows */}
-//       <div className="space-y-0 mb-5">
-//         {stats.map((s) => (
-//           <div
-//             key={s.key}
-//             className="flex justify-between items-center py-2 border-b border-white/5"
-//           >
-//             <span className="text-xs text-gray-500 font-medium">{s.key}</span>
-//             <span
-//               className={
-//                 'text-xs font-bold ' +
-//                 (s.highlight ? 'text-green-400' : 'text-white')
-//               }
-//             >
-//               {s.value}
-//             </span>
-//           </div>
-//         ))}
-//       </div>
-
-//       {/* Preview instructions */}
-//       <div className="mb-5">
-//         <p className="text-xs text-gray-500 font-bold uppercase tracking-widest mb-2">
-//           Preview Generated Site
-//         </p>
-//         <div className="bg-[#0d1117] rounded-xl p-4 border border-[#1f2937]">
-//           <p className="text-xs text-yellow-400 font-bold mb-3 flex items-center gap-1.5">
-//             <span>⚠️</span>
-//             Run these commands first:
-//           </p>
-
-//           {/* Commands */}
-//           <div className="space-y-1 mb-3">
-//             {commands.map((cmd) => (
-//               <p key={cmd} className="font-mono text-xs text-green-400">
-//                 {cmd}
-//               </p>
-//             ))}
-//           </div>
-
-//           {/* Link */}
-//           <div className="pt-3 border-t border-[#1f2937]">
-//             <p className="text-xs text-gray-600 mb-1">Then open in browser:</p>
-//             <a
-//               href="http://localhost:3000"
-//               target="_blank"
-//               rel="noopener noreferrer"
-//               className="text-xs text-indigo-400 hover:text-indigo-300 hover:underline font-mono transition-colors"
-//             >
-//               http://localhost:3000 ↗
-//             </a>
-//           </div>
-//         </div>
-//       </div>
-
-//       {/* Generated page links */}
-//       <div>
-//         <p className="text-xs text-gray-500 font-bold uppercase tracking-widest mb-2">
-//           Generated Pages
-//         </p>
-//         <div className="grid grid-cols-2 gap-2">
-//           {PAGE_LINKS.map(({ label, route }) => {
-//             const href = 'http://localhost:3000' + route
-//             const cls = isEnhanced
-//               ? 'bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 hover:bg-indigo-500/20 hover:text-white'
-//               : 'bg-white/5 border border-white/10 text-gray-300 hover:bg-white/10 hover:text-white'
-//             return (
-//               <a
-//                 key={label}
-//                 href={href}
-//                 target="_blank"
-//                 rel="noopener noreferrer"
-//                 className={
-//                   'text-center py-2.5 px-3 rounded-xl text-xs font-bold ' +
-//                   'transition-all duration-200 hover:scale-[1.02] ' +
-//                   cls
-//                 }
-//               >
-//                 {label} ↗
-//               </a>
-//             )
-//           })}
-//         </div>
-//         <p className="text-xs text-gray-700 mt-2 text-center">
-//           Links work only after npm run dev is running
-//         </p>
-//       </div>
-
-//     </div>
-//   )
-// }
-
 'use client'
 
 import { RunStatus } from '@/lib/api'
@@ -242,9 +52,10 @@ export default function OutputPanel({ status }: Props) {
     ['Best Score', `${score}%`],
   ]
 
-  const pages: [string, string][] = [
-    ['Landing', '/'], ['About', '/about'], ['Contact', '/contact'], ['Products', '/products'],
-  ]
+  // Real pages that were actually generated for this run — not a hardcoded guess.
+  const pages = status.pages && status.pages.length > 0
+    ? status.pages
+    : [{ name: 'Landing', route: '/' }]
 
   const cmds = [`cd "${path}"`, 'npm install', 'npm run dev']
 
@@ -306,12 +117,12 @@ export default function OutputPanel({ status }: Props) {
         </div>
       </div>
 
-      {/* Page links */}
+      {/* Page links — reflects the pages actually generated for this run */}
       <div>
         <SectionLabel>Generated Pages</SectionLabel>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
-          {pages.map(([label, route]) => (
-            <a key={label}
+          {pages.map(({ name, route }) => (
+            <a key={route}
               href={`http://localhost:3000${route}`}
               target="_blank" rel="noopener noreferrer"
               style={{
@@ -323,7 +134,7 @@ export default function OutputPanel({ status }: Props) {
                 transition:'all 0.2s',
               }}
             >
-              {label} ↗
+              {name} ↗
             </a>
           ))}
         </div>

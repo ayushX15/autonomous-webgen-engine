@@ -34,10 +34,15 @@ class UserInput(BaseModel):
 class AgentState(BaseModel):
     user_input: Optional[UserInput] = None
     captured_features: Optional[CapturedFeatures] = None
+    reference_analysis: dict = Field(default={})
+    # base64 of the reference screenshot (scraped site or uploaded image), cached
+    # so the generator can feed the actual reference image into Gemini at
+    # generation time (vision-grounded) instead of only a text description.
+    reference_image_b64: Optional[str] = None
     generated_pages: List[GeneratedPage] = Field(default=[])
     output_run_id: Optional[str] = None
     current_iteration: int = Field(default=0)
-    max_iterations: int = Field(default=5)
+    max_iterations: int = Field(default=2)
     iteration_results: List[IterationResult] = Field(default=[])
     latest_feedback: List[str] = Field(default=[])
     is_complete: bool = Field(default=False)

@@ -7,3 +7,11 @@ node_modules/
 generated-output/
 *.env
 secret.env
+!secret.env.example
+*.log
+.next/
+
+# runtime / dev artifacts
+last_run_id.txt
+visual_reviewer_error.txt
+gemtest.py
